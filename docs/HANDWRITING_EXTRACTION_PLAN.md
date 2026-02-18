@@ -215,28 +215,114 @@ Before creating an event, check:
 
 ---
 
+## CRITICAL DISCOVERY: macOS MTP Issue
+
+**Date**: 2026-02-18
+**Finding**: The Kindle Scribe uses **MTP (Media Transfer Protocol)**, NOT USB Mass Storage.
+
+### What this means
+
+- macOS does **not** natively support MTP
+- The Scribe is detected as a USB device (`system_profiler SPUSBDataType` shows it) but does **not** mount under `/Volumes/`
+- The original `scribe_watcher.sh` polling `/Volumes/` for a "Kindle" volume **will not work on macOS**
+- The Windows version works because Windows has native MTP support (which the COM `Shell.Application` object uses)
+
+### Device info from USB detection
+
+```
+Amazon: Kindle Scribe 32GB
+Vendor ID: 0x1949 (Lab126)
+Product ID: 0x9981
+```
+
+### Confirmed: libmtp can see the device
+
+```bash
+brew install libmtp
+mtp-detect
+```
+
+Output confirms the device is recognized and the interface is MTP:
+```
+Device 0 (VID=1949 and PID=9981) is a Amazon Kindle Scribe 32GB.
+Interface description contains the string "MTP"
+Device recognized as MTP, no further probing.
+```
+
+### Solution options
+
+| Option | Approach | Pros | Cons |
+|--------|----------|------|------|
+| **A. libmtp CLI tools** | Use `mtp-files`, `mtp-getfile`, `mtp-sendfile` directly | Already installed, works | CLI tools are slow, no filesystem mount |
+| **B. FUSE + jmtpfs** | `brew install macfuse jmtpfs`, mount as `/Volumes/Kindle` | Scripts work as-is with `/Volumes/` polling | Requires macFUSE (kernel extension), security implications on modern macOS |
+| **C. Python libmtp bindings** | Use `python-libmtp` or call libmtp CLI from Python | Fine-grained control, no FUSE needed | More code, different file access pattern |
+| **D. OpenMTP (GUI)** | Use OpenMTP app for manual file transfer | Easy for users | Not scriptable, defeats automation goal |
+
+### Recommended approach: Option A (libmtp CLI) with wrapper
+
+Use libmtp CLI tools (`mtp-files`, `mtp-getfile`, `mtp-sendfile`) wrapped in a helper script. This avoids FUSE/kernel extension requirements and works now.
+
+The scripts need to be refactored:
+1. **`scribe_watcher.sh`**: Instead of polling `/Volumes/`, use `mtp-detect` to check for device
+2. **`export_from_scribe.sh`**: Instead of `cp` from filesystem, use `mtp-getfile` to pull files
+3. **`sync_calendar.sh`**: Instead of `cp` to filesystem, use `mtp-sendfile` to push PDFs
+4. **New: `script/mtp_helper.sh`**: Common functions for MTP file operations (list, get, send)
+
+### Updated file access pattern
+
+```bash
+# List files in a directory
+mtp-files 2>&1 | grep "documents/"
+
+# Download a file from Kindle
+mtp-getfile <file_id> /local/path/output.pdf
+
+# Upload a file to Kindle
+mtp-sendfile /local/path/calendar.pdf /documents/
+
+# Check if device is connected
+mtp-detect 2>&1 | grep -q "Kindle Scribe" && echo "connected"
+```
+
+### TODO: Test on device
+
+- [ ] Run `mtp-files` to see full file listing and understand file ID scheme
+- [ ] Test `mtp-getfile` to pull a PDF from the Scribe
+- [ ] Test `mtp-sendfile` to push a PDF to the Scribe
+- [ ] Check if `.sdr` directories and their contents are visible via MTP
+- [ ] Measure transfer speed for typical operations
+
+---
+
 ## Open Questions (to test on the laptop with Scribe)
+
+### Q0 (NEW): Can we access .sdr files via MTP?
+
+**Test**: Run `mtp-files` and look for `.sdr` directories. MTP may hide them or they may not be accessible through the MTP interface.
+
+```bash
+mtp-files 2>&1 | grep -i sdr
+```
+
+If `.sdr` is not visible via MTP, we'll need to explore alternatives (e.g., use ADB if the Scribe supports it, or accept that annotation extraction requires a different approach).
 
 ### Q1: Does the Scribe embed annotations in the PDF or only in .sdr?
 
-**Test**: Write on a calendar PDF on the Scribe. Connect via USB. Open the PDF from the Kindle `documents/` folder in a desktop PDF viewer (Preview, Chrome, etc.).
+**Test**: Pull a PDF that has been annotated on the Scribe using `mtp-getfile`. Open it in Preview on the Mac.
 
-- **If annotations are visible**: pymupdf will render them directly. Simplest path.
+- **If annotations are visible in the PDF**: pymupdf will render them directly. Simplest path.
 - **If annotations are NOT visible**: They're in `.sdr` only. We'll need to either:
-  - Parse the `.sdr` binary format (fragile but doable)
+  - Pull the `.sdr` data via MTP and parse it
   - Render the `.sdr` strokes ourselves with Pillow onto the page image
-  - Investigate if `pymupdf` can load `.sdr` as an annotation layer
 
-### Q2: What's the .sdr directory structure for a calendar PDF?
+### Q2: What's the .sdr directory structure for an annotated PDF?
 
-**Test**: After writing on a calendar, check:
+**Test**: After writing on a PDF, check via MTP:
 ```bash
-ls -la "/Volumes/Kindle/documents/Calendar 2025-03.sdr/"
-file "/Volumes/Kindle/documents/Calendar 2025-03.sdr/"*
-xxd "/Volumes/Kindle/documents/Calendar 2025-03.sdr/"* | head -100
+mtp-files 2>&1 | grep -A5 "Calendar"
 ```
 
-Document the filenames, sizes, and first few hundred bytes of each file.
+Document the filenames, sizes, and structure of any `.sdr` related files.
 
 ### Q3: Scope upgrade — does deleting the token and re-authorizing work cleanly?
 
@@ -248,11 +334,13 @@ Document the filenames, sizes, and first few hundred bytes of each file.
 
 ---
 
-## Execution Order
+## Execution Order (Updated)
 
-1. **On laptop with Scribe**: Answer Q1 and Q2 above (10 min)
-2. **Build `read_calendar.py`**: Core pipeline (render → crop → diff → API → push)
-3. **Build `read_calendar.sh`**: Shell wrapper with config
-4. **Wire into watcher**: Add to `scribe_watcher.sh` / `.ps1`
-5. **Update setup scripts**: Add config prompts
-6. **Test end-to-end**: Write on calendar, plug in, verify events appear in Google Calendar
+1. **MTP file access**: Test `mtp-files`, `mtp-getfile`, `mtp-sendfile` with the Scribe
+2. **Refactor scripts for MTP**: Update watcher, export, and sync scripts to use libmtp instead of `/Volumes/` filesystem
+3. **Answer Q0-Q2**: Check .sdr visibility and annotation embedding via MTP
+4. **Build `read_calendar.py`**: Core pipeline (render → crop → diff → API → push)
+5. **Build `read_calendar.sh`**: Shell wrapper with config
+6. **Wire into watcher**: Add to `scribe_watcher.sh`
+7. **Update setup scripts**: Add config prompts, dependency checks
+8. **Test end-to-end**: Write on calendar, plug in, verify events appear in Google Calendar
