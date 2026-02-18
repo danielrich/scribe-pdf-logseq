@@ -50,6 +50,11 @@ while true; do
                 bash "$SCRIPT_PATH/add_to_logseq.sh"
             fi
 
+            # Sync calendar PDF to Kindle if configured
+            if [ "$SYNC_CALENDAR" = "Yes" ]; then
+                bash "$SCRIPT_PATH/sync_calendar.sh" "$KINDLE_VOLUME"
+            fi
+
             CONNECTED=true
         fi
     fi

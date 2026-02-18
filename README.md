@@ -93,6 +93,76 @@ On macOS, the Kindle Scribe mounts as a standard volume under `/Volumes/` (typic
 
 ---
 
+## Google Calendar Sync (macOS)
+
+Automatically generate a monthly calendar PDF with your Google Calendar events and push it to your Kindle Scribe. Write on the calendar with your pen, and when events update, the PDF regenerates with the same fixed layout — your handwritten annotations stay in place.
+
+### How It Works
+
+1. The script generates a monthly calendar PDF using a **fixed grid layout**
+2. Google Calendar events appear as text within each day's cell
+3. The PDF is copied to the Kindle Scribe's `documents/` folder
+4. You write on the calendar with the Scribe's pen
+5. Next sync: the PDF regenerates with updated events, **same layout coordinates**
+6. The Scribe's pen annotations are stored in `.sdr` sidecar files as position-based overlays, so they stay aligned
+
+### Setup
+
+1. **Install Python dependencies:**
+   ```bash
+   pip3 install -r requirements.txt
+   ```
+
+2. **Set up Google Calendar API credentials:**
+   - Go to [Google Cloud Console](https://console.cloud.google.com/)
+   - Create a new project (or use an existing one)
+   - Enable the **Google Calendar API**
+   - Go to Credentials > Create Credentials > OAuth client ID
+   - Choose "Desktop app"
+   - Download the credentials JSON file
+   - Save it as `settings/credentials.json`
+
+   The first time you run the calendar sync, it will open a browser window to authorize access. After that, a token is cached locally.
+
+3. **Run setup.sh** and say "Yes" to the calendar sync option.
+
+### Usage
+
+**Automatic (via watcher):** If calendar sync is enabled in setup, it runs automatically when the Kindle connects.
+
+**Manual:**
+```bash
+# Generate and push to connected Kindle
+bash script/sync_calendar.sh
+
+# Generate a specific month
+python3 script/generate_calendar.py --month 2025-03 --output my_calendar.pdf
+
+# Without Google Calendar (blank calendar or local events only)
+python3 script/generate_calendar.py --no-google --output my_calendar.pdf
+```
+
+### Local Events File (Alternative to Google)
+
+If you don't want to use the Google Calendar API, you can create a `settings/events.json` file:
+
+```json
+[
+    {"date": "2025-03-15", "display": "Dentist 2pm", "summary": "Dentist"},
+    {"date": "2025-03-20", "display": "Team lunch", "summary": "Team lunch"}
+]
+```
+
+Events from both Google Calendar and the local JSON file are merged.
+
+### Important Notes
+
+- The calendar uses a **pixel-perfect fixed grid layout**. This is critical — if the layout shifts, your pen annotations will be misaligned.
+- The PDF is regenerated from scratch each sync. Your handwritten annotations persist because they're stored separately by the Scribe in `.sdr` files, not in the PDF itself.
+- You can generate up to 3 months ahead (configured during setup).
+
+---
+
 ## Customizing the PDF Label
 
 ### Modifying Labels via `notebook_labels.json`

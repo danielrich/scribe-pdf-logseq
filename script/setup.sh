@@ -60,6 +60,19 @@ if [ "$updateLogSeq" = "Yes" ]; then
     repoPath=$(prompt_input "Enter LogSeq Git Repository Path" "$logSeqFolder")
 fi
 
+echo ""
+echo "=== Google Calendar Sync ==="
+syncCalendar=$(prompt_input "Sync Google Calendar to Scribe PDF (Yes/No)" "Yes")
+
+if [ "$syncCalendar" = "Yes" ]; then
+    calendarPdfName=$(prompt_input "Calendar PDF base name" "Calendar")
+    calendarMonths=$(prompt_input "Number of months to generate (1-3)" "1")
+    echo ""
+    echo "To use Google Calendar, you need a credentials.json file from Google Cloud Console."
+    echo "Place it at: $PARENT_FOLDER/settings/credentials.json"
+    echo "(You can also use a local events.json file instead — see README)"
+fi
+
 # Ensure the settings directory exists
 SETTINGS_DIR="$(dirname "$CONFIG_FILE")"
 mkdir -p "$SETTINGS_DIR"
@@ -88,6 +101,9 @@ MARKDOWN_FILE="$markdownFile"
 REPO_PATH="$repoPath"
 SETTINGS_DIRECTORY="$SETTINGS_DIR"
 SCRIPT_PATH="$SCRIPT_DIR"
+SYNC_CALENDAR="$syncCalendar"
+CALENDAR_PDF_NAME="$calendarPdfName"
+CALENDAR_MONTHS="$calendarMonths"
 CONFIGEOF
 
 echo ""

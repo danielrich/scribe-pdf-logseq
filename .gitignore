@@ -11,3 +11,6 @@
 
 # Make sure shell scripts are tracked
 !script/*.sh
+
+# Include requirements.txt
+!requirements.txt
