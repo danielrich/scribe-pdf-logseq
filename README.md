@@ -1,16 +1,15 @@
 
-# Kindle Scribe to Logseq Automation (Windows)
+# Kindle Scribe to Logseq Automation (Windows & macOS)
 
-This repository contains PowerShell scripts to automate exporting notebooks from a Kindle Scribe, converting them to PDF, and integrating them into Logseq.
+This repository contains scripts to automate exporting notebooks from a Kindle Scribe, converting them to PDF, and integrating them into Logseq.
 
-The script can be left running, when you want to sync the notebooks from your kindle scribe to your pc and logseq, simply plug it in through usb.  The script will watch for the connection, check for any new or changed notebooks, convert them to pdf, and add them to the LogSeq page "Scribe Notebooks.md".
+The script can be left running. When you want to sync the notebooks from your Kindle Scribe, simply plug it in through USB. The script will watch for the connection, check for any new or changed notebooks, convert them to PDF, and add them to the LogSeq page "Scribe Notebooks.md".
 
 ## Overview
 
-The main script, `scribe_watcher.ps1`, monitors for the connection of a Kindle Scribe device, exports the notebooks, converts them to PDF, and integrates them into Logseq.
+The main script (`scribe_watcher.ps1` on Windows, `scribe_watcher.sh` on macOS) monitors for the connection of a Kindle Scribe device, exports the notebooks, converts them to PDF, and integrates them into Logseq.
 
 ## Video
-
 
 
 
@@ -23,26 +22,76 @@ Ensure the following are installed:
 
 1. **Calibre**: An e-book manager. [Info Here](https://calibre-ebook.com/)
 2. **KFX Input Plugin**: Required for handling Kindle formats. [Info Here](https://www.mobileread.com/forums/showthread.php?t=291290).
-3. **LogSeq**: The main intent is to add the Notebooks converted to pdf to logseq.  It can also be used without logseq to just generate the pdfs from your notebooks. [Info here](https://logseq.com/)
+3. **LogSeq**: The main intent is to add the Notebooks converted to pdf to logseq. It can also be used without logseq to just generate the pdfs from your notebooks. [Info here](https://logseq.com/)
 
-## Scripts and Variables
+---
 
-### `setup.ps1`
+## macOS Setup
 
-Run this script first, it will create a settings/config.ps1 file containing your configuration.
+### Install Prerequisites
 
+1. **Install Calibre** from [calibre-ebook.com](https://calibre-ebook.com/download_osx) or via Homebrew:
+   ```bash
+   brew install --cask calibre
+   ```
 
-### `scribe_watcher.ps1`
+2. **Install the KFX Input Plugin** in Calibre:
+   - Open Calibre
+   - Go to Preferences > Plugins > Get new plugins
+   - Search for "KFX Input" and install it
+   - Or download from [MobileRead](https://www.mobileread.com/forums/showthread.php?t=291290) and install manually
 
-This script monitors for the Kindle Scribe device connection and triggers the export and conversion process.
+3. **Install LogSeq** (optional) from [logseq.com](https://logseq.com/)
 
-### `export_from_scribe.ps1`
+### macOS Scripts
 
-Handles the extraction of notebooks from the connected Kindle Scribe.
+| Script | Description |
+|--------|-------------|
+| `setup.sh` | Interactive configuration wizard. Run this first. |
+| `scribe_watcher.sh` | Watches for Kindle Scribe USB connection and triggers sync. |
+| `export_from_scribe.sh` | Extracts notebooks from the Kindle and converts them to PDF via Calibre. |
+| `add_to_logseq.sh` | Copies PDFs to Logseq assets and updates the Scribe Notebooks page. |
 
-### `add_to_logseq.ps1`
+### macOS Usage
 
-Manages the process of adding the converted PDFs into Logseq.
+1. Run the setup script to create your configuration:
+   ```bash
+   cd script
+   bash setup.sh
+   ```
+
+2. Start the watcher:
+   ```bash
+   bash script/scribe_watcher.sh
+   ```
+
+3. Connect your Kindle Scribe via USB. The script will automatically detect it, export notebooks, and sync to Logseq.
+
+### How It Works on macOS
+
+On macOS, the Kindle Scribe mounts as a standard volume under `/Volumes/` (typically `/Volumes/Kindle`). The watcher script polls for this mount point every 5 seconds. When detected, it accesses the notebooks directly through the filesystem — no special drivers or COM objects needed.
+
+---
+
+## Windows Setup
+
+### Windows Scripts
+
+| Script | Description |
+|--------|-------------|
+| `setup.ps1` | Interactive configuration wizard. Run this first. |
+| `scribe_watcher.ps1` | Watches for Kindle Scribe USB connection and triggers sync. |
+| `export_from_scribe.ps1` | Extracts notebooks from the Kindle and converts them to PDF via Calibre. |
+| `add_to_logseq.ps1` | Copies PDFs to Logseq assets and updates the Scribe Notebooks page. |
+
+### Windows Usage
+
+1. Ensure all prerequisites are installed and paths are correctly set in the scripts.
+2. Run `setup.ps1` script
+3. Run the `scribe_watcher.ps1` script. The script will detect the device, export notebooks, convert them to PDF, and integrate them into Logseq.
+4. Connect your Kindle Scribe to the computer.
+
+---
 
 ## Customizing the PDF Label
 
@@ -63,26 +112,17 @@ In this example, the notebook with the ID `12345-abcde-67890` will generate a PD
 
 ### Customizing the PDF Filename in Script
 
-The script uses these labels when setting the PDF filename:
-
-```powershell
-$label = $jsonObject.Notebooks[$notebook.Id].Label
-$pdfFilename = "${label}.pdf"
-```
-
-By updating the `notebook_labels.json` file, you control the naming of the output PDF files.
-
-## Usage
-
-1. Ensure all prerequisites are installed and paths are correctly set in the scripts.
-2. Run `setup.ps1` script 
-3. Run the `scribe_watcher.ps1` script. The script will detect the device, export notebooks, convert them to PDF, and integrate them into Logseq.
-4. Connect your Kindle Scribe to the computer.
+The script uses these labels when setting the PDF filename. By updating the `notebook_labels.json` file, you control the naming of the output PDF files.
 
 ## Troubleshooting
 
-- **Calibre Not Found**: Verify the `$calibrePath` and `$ebookConvertPath` variables are correctly set and point to the appropriate Calibre installation directories.
-- **Kindle Not Detected**: Check that the `$deviceNamePattern` matches the connected device's name and ensure the device is properly connected.
+- **Calibre Not Found**: Verify the Calibre paths in your configuration.
+  - macOS default: `/Applications/calibre.app/Contents/MacOS/calibre-debug`
+  - Windows default: `C:\Program Files\Calibre2\calibre-debug.exe`
+- **Kindle Not Detected**:
+  - macOS: Check that your Kindle appears under `/Volumes/` when plugged in. Run `ls /Volumes/` to verify.
+  - Windows: Check that the device name pattern matches the connected device's name in File Explorer.
+- **Permission Denied (macOS)**: Make scripts executable with `chmod +x script/*.sh`
 
 ## Contributions
 

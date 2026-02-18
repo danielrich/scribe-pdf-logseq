@@ -8,3 +8,6 @@
 # Except README.md
 !README.md
 !.gitignore
+
+# Make sure shell scripts are tracked
+!script/*.sh
