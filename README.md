@@ -163,6 +163,96 @@ Events from both Google Calendar and the local JSON file are merged.
 
 ---
 
+## Handwriting-to-Calendar Sync (Planned)
+
+Write events on the calendar PDF with your Scribe pen. When you plug the Scribe back in, your handwritten entries are automatically read and pushed to Google Calendar. Zero interaction needed on the Scribe — just plug in and go.
+
+### How It Works
+
+```
+Kindle Scribe connected via USB
+        │
+        ▼
+Copy calendar PDF from Kindle documents/ folder
+        │
+        ▼
+Render each page as an image (pymupdf)
+  ─ the rendered image includes both the printed
+    calendar grid AND your pen annotations
+        │
+        ▼
+Crop each day cell using the known fixed grid coordinates
+  ─ same constants from generate_calendar.py
+        │
+        ▼
+Filter out cells with no handwriting
+  ─ compare against a "clean" render of the original PDF
+  ─ pixel diff > threshold = handwriting present
+        │
+        ▼
+Send non-empty cell images to Claude vision API
+  ─ prompt: "This is [Day, Month Date]. What calendar
+    event is written here? Return time + description."
+        │
+        ▼
+Parse structured response → create Google Calendar events
+  ─ uses same Google Calendar API credentials from calendar sync
+```
+
+### Why image rendering instead of parsing .sdr directly
+
+The Scribe stores pen annotations in `.sdr` sidecar files using a proprietary binary format. While portions have been reverse-engineered, the format is undocumented and can change with firmware updates. Rendering the PDF page as an image is more robust:
+
+- **pymupdf** renders PDF pages including any annotation overlays in one call
+- We already know the exact grid coordinates (they're the same constants used to generate the PDF)
+- Cropping cells is pixel math against known dimensions — no binary format parsing
+- Works regardless of Scribe firmware version
+
+### Pipeline Integration
+
+The handwriting extraction runs as part of the existing watcher flow:
+
+```
+scribe_watcher.sh detects Kindle USB connection
+        │
+        ├── export_from_scribe.sh   (notebooks → PDF)
+        ├── add_to_logseq.sh        (PDFs → Logseq)
+        ├── sync_calendar.sh        (Google Calendar → Kindle PDF)
+        │
+        └── read_calendar.sh   ← NEW
+                │
+                ├── render calendar PDF pages as images
+                ├── crop day cells from grid
+                ├── detect handwriting via pixel diff
+                ├── send to Claude vision API
+                └── create Google Calendar events
+```
+
+### Prerequisites (in addition to existing)
+
+- **pymupdf**: PDF-to-image rendering (`pip3 install pymupdf`)
+- **Pillow**: Image cropping and comparison (`pip3 install Pillow`)
+- **Anthropic Python SDK**: Claude vision API for handwriting recognition (`pip3 install anthropic`)
+- **Anthropic API key**: Set as `ANTHROPIC_API_KEY` environment variable or in `settings/config.sh`
+- **Google Calendar API credentials**: Same `settings/credentials.json` used by calendar sync, but with **read-write** scope (the setup will prompt to re-authorize if currently read-only)
+
+### Configuration
+
+During `setup.sh`, you'll be asked:
+
+| Setting | Description | Default |
+|---------|-------------|---------|
+| `ENABLE_CALENDAR_READ` | Enable handwriting extraction on sync | `false` |
+| `ANTHROPIC_API_KEY` | API key for Claude vision | (none) |
+| `CALENDAR_READ_MODEL` | Claude model for handwriting recognition | `claude-sonnet-4-5-20250929` |
+| `CALENDAR_READ_CONFIDENCE` | Minimum confidence to auto-create events | `0.8` |
+
+### Deduplication
+
+Events that already exist in Google Calendar (matching date + similar summary) are skipped. The script also maintains a local `settings/calendar_read_history.json` to track which handwritten entries have already been processed, preventing duplicates across syncs.
+
+---
+
 ## Customizing the PDF Label
 
 ### Modifying Labels via `notebook_labels.json`

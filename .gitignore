@@ -14,3 +14,7 @@
 
 # Include requirements.txt
 !requirements.txt
+
+# Include docs
+!docs/
+!docs/**
