@@ -284,12 +284,60 @@ mtp-sendfile /local/path/calendar.pdf /documents/
 mtp-detect 2>&1 | grep -q "Kindle Scribe" && echo "connected"
 ```
 
-### TODO: Test on device
+### MTP File Listing Results (2026-02-18)
 
-- [ ] Run `mtp-files` to see full file listing and understand file ID scheme
-- [ ] Test `mtp-getfile` to pull a PDF from the Scribe
+Ran `mtp-files` on connected Scribe. 3,829 files total. Key findings:
+
+**1. No `.sdr` sidecar directories visible via MTP.**
+The only `.sdr` references are temp files embedded in other filenames (e.g., `Book_title.sdr.tmp20_EBOK`).
+
+**2. PDFs are stored as `.kfx` files internally.**
+The Kindle converts all PDFs to its KFX format. Each document has associated files:
+
+```
+# Example: 2025_calendar.pdf
+2025_calendar.pdf_FPVK3ESFG5KSA7TEXTLEPJYFQOLRDWOD.kfx         (8.6 MB - the content)
+2025_calendar.pdf_FPVK3ESFG5KSA7TEXTLEPJYFQOLRDWOD...yjf       (492 B - metadata?)
+2025_calendar.pdf_FPVK3ESFG5KSA7TEXTLEPJYFQOLRDWOD...yjr       (9.3 KB - annotations/progress?)
+```
+
+File types:
+- `.kfx` — the converted book/PDF content
+- `.yjf` — appears to be metadata (small, ~100-500 bytes)
+- `.yjr` — appears to be reading progress and/or annotations (varies, up to 10KB+)
+- `.yjr.bad_file` — some kind of recovery/fallback data
+
+**3. Calendar/planner PDFs on the device:**
+
+| File | KFX Size | .yjr Size | Notes |
+|------|----------|-----------|-------|
+| `2025_calendar.pdf` | 8.6 MB | 9.3 KB | Has annotations? |
+| `2024-training-calendar.pdf` | 51.9 MB | 1.2 KB | |
+| `2026-Planner-Lined.pdf` | 7.0 MB | 1.2 KB | |
+| `2027-Planner-Lined.pdf` | 7.0 MB | (none) | No .yjr = unopened? |
+
+The `2025_calendar.pdf` has the largest `.yjr` file (9.3 KB), suggesting it has the most annotation/reading data — likely has handwritten content.
+
+**4. Notebooks (.nbk) are accessible.** Multiple nbk files visible with parent ID hierarchy.
+
+**5. No standard folder structure visible.** All files are flat with `Parent ID` references. No `/documents/` or `/Internal Storage/` folders appear in the listing — the Kindle's MTP implementation doesn't expose the folder hierarchy the same way Windows COM does.
+
+### Revised approach based on MTP findings
+
+Since `.sdr` files aren't accessible via MTP, and the Kindle converts PDFs to `.kfx`:
+
+1. **Download the `.kfx` file** — use `mtp-getfile` with the file ID
+2. **Convert `.kfx` back to PDF** — Calibre's KFX Input plugin can do this (we already use it for notebooks)
+3. **Check if pen annotations survive the round-trip** — if they're embedded in the `.kfx`, the converted PDF should show them
+4. **Also download the `.yjr` file** — examine its binary format; it may contain pen stroke data separately
+
+### TODO
+
+- [x] Run `mtp-files` to see full file listing
+- [ ] Test `mtp-getfile` to pull the `2025_calendar.pdf` `.kfx` and `.yjr` files
+- [ ] Convert `.kfx` back to PDF with Calibre and check for pen annotations
+- [ ] Examine `.yjr` binary format for pen stroke data
 - [ ] Test `mtp-sendfile` to push a PDF to the Scribe
-- [ ] Check if `.sdr` directories and their contents are visible via MTP
 - [ ] Measure transfer speed for typical operations
 
 ---
