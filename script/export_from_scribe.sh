@@ -1,10 +1,10 @@
 #!/bin/bash
 # export_from_scribe.sh - macOS notebook extraction and conversion
 #
-# On macOS, the Kindle Scribe is mounted as a regular volume, so we can
-# access notebooks directly via the filesystem (no COM objects needed).
+# Uses mtp_pull.py to download notebooks from the Kindle Scribe via MTP,
+# then converts them to PDF via Calibre's KFX Input plugin.
 #
-# Usage: export_from_scribe.sh [kindle_volume_path]
+# Usage: export_from_scribe.sh
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PARENT_FOLDER="$(dirname "$SCRIPT_DIR")"
@@ -16,34 +16,6 @@ if [ ! -f "$CONFIG_FILE" ]; then
     exit 1
 fi
 source "$CONFIG_FILE"
-
-# Accept Kindle volume path as argument or try to find it
-KINDLE_VOLUME="${1:-}"
-if [ -z "$KINDLE_VOLUME" ]; then
-    for vol in /Volumes/*/; do
-        vol_name="$(basename "$vol")"
-        if echo "$vol_name" | grep -iq "$DEVICE_NAME_PATTERN"; then
-            KINDLE_VOLUME="$vol"
-            break
-        fi
-    done
-fi
-
-if [ -z "$KINDLE_VOLUME" ] || [ ! -d "$KINDLE_VOLUME" ]; then
-    echo "Kindle Scribe is not connected. Please connect your device and try again."
-    exit 1
-fi
-
-echo "Found Kindle at: $KINDLE_VOLUME"
-
-# Path to notebooks on the device
-NOTEBOOKS_PATH="$KINDLE_VOLUME/$INTERNAL_STORAGE_FOLDER_NAME/$NOTEBOOKS_FOLDER_NAME"
-
-if [ ! -d "$NOTEBOOKS_PATH" ]; then
-    echo "'.notebooks' folder not found at: $NOTEBOOKS_PATH"
-    echo "Make sure your Kindle Scribe has notebooks on it."
-    exit 1
-fi
 
 # Ensure output directories exist
 mkdir -p "$DESTINATION_PATH"
@@ -58,11 +30,6 @@ JSON_FILE="$SETTINGS_DIRECTORY/notebook_labels.json"
 if [ ! -f "$JSON_FILE" ]; then
     echo "{}" > "$JSON_FILE"
 fi
-
-# Function to compute SHA-256 hash of a file
-get_file_hash() {
-    shasum -a 256 "$1" 2>/dev/null | awk '{print $1}'
-}
 
 # Function to read a value from the JSON labels file
 json_get() {
@@ -94,22 +61,49 @@ sanitize_filename() {
     echo "$1" | sed 's/[<>:"\/\\|?*]//g'
 }
 
-# Loop through each folder in .notebooks
-for folder in "$NOTEBOOKS_PATH"/*/; do
-    [ -d "$folder" ] || continue
+# --- Step 1: Download notebooks from Scribe via MTP ---
 
-    folder_name="$(basename "$folder")"
+echo "Downloading notebooks from Kindle Scribe via MTP..."
+MTP_SCRIPT="$SCRIPT_DIR/mtp_pull.py"
 
-    # Check if folder name matches GUID pattern
-    if ! echo "$folder_name" | grep -qE "$GUID_PATTERN"; then
-        continue
-    fi
+if [ ! -f "$MTP_SCRIPT" ]; then
+    echo "ERROR: mtp_pull.py not found at $MTP_SCRIPT"
+    exit 1
+fi
 
-    # Look for the nbk file
-    NBK_FILE="$folder/$NBK_FILE_NAME"
-    if [ ! -f "$NBK_FILE" ]; then
-        continue
-    fi
+# pull-notebooks handles: connect, find .notebooks, download changed nbk files
+# It uses SHA256 hashing internally to skip unchanged notebooks
+PULL_OUTPUT=$(python3 "$MTP_SCRIPT" --pull-notebooks "$DESTINATION_PATH" --json 2>/tmp/mtp_pull_stderr.txt)
+PULL_EXIT=$?
+
+# Show MTP status messages
+cat /tmp/mtp_pull_stderr.txt
+
+if [ $PULL_EXIT -ne 0 ]; then
+    echo "ERROR: Failed to pull notebooks from Scribe."
+    exit 1
+fi
+
+# Parse the JSON output to get list of downloaded (new/changed) notebooks
+# Format: [{"guid": "...", "path": "...", "size": 123}, ...]
+CHANGED_GUIDS=$(echo "$PULL_OUTPUT" | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+for nb in data:
+    print(nb['guid'])
+" 2>/dev/null)
+
+if [ -z "$CHANGED_GUIDS" ]; then
+    echo "All notebooks up to date. Nothing to convert."
+    exit 0
+fi
+
+# --- Step 2: Convert changed notebooks to PDF ---
+
+echo "$CHANGED_GUIDS" | while IFS= read -r folder_name; do
+    [ -z "$folder_name" ] && continue
+
+    GUID_FOLDER="$DESTINATION_PATH/$folder_name"
 
     # Get or generate label
     label=$(json_get "$folder_name")
@@ -119,41 +113,30 @@ for folder in "$NOTEBOOKS_PATH"/*/; do
         json_set "$folder_name" "$label"
     fi
 
-    # Create GUID folder in destination
-    GUID_FOLDER="$DESTINATION_PATH/$folder_name"
-    mkdir -p "$GUID_FOLDER"
-
-    # Destination for the nbk file copy
-    DEST_NBK="$GUID_FOLDER/$NBK_FILE_NAME"
-
-    # Check if file has changed using hash comparison
-    PREVIOUS_HASH=""
-    if [ -f "$DEST_NBK" ]; then
-        PREVIOUS_HASH=$(get_file_hash "$DEST_NBK")
-    fi
-
-    # Copy the nbk file from the Kindle
-    cp "$NBK_FILE" "$DEST_NBK"
-
-    CURRENT_HASH=$(get_file_hash "$DEST_NBK")
-
-    if [ "$CURRENT_HASH" = "$PREVIOUS_HASH" ] && [ -n "$PREVIOUS_HASH" ]; then
-        echo "Notebook unchanged - $DEST_NBK"
-        continue
-    fi
-
-    echo "Notebook change detected. Processing: $DEST_NBK"
+    echo "Processing: $folder_name ($label)"
 
     # Convert nbk to epub using Calibre KFX Input plugin
     OUTPUT_EPUB="$OUTPUT_EPUB_DIRECTORY/${folder_name}.epub"
-    echo "Executing: $CALIBRE_PATH -r \"$PLUGIN_NAME\" -- \"$GUID_FOLDER\" \"$OUTPUT_EPUB\""
+    echo "  NBK -> EPUB: $CALIBRE_PATH -r \"$PLUGIN_NAME\" -- \"$GUID_FOLDER\" \"$OUTPUT_EPUB\""
     "$CALIBRE_PATH" -r "$PLUGIN_NAME" -- "$GUID_FOLDER" "$OUTPUT_EPUB"
+
+    if [ $? -ne 0 ]; then
+        echo "  ERROR: Calibre conversion failed for $folder_name"
+        continue
+    fi
 
     # Convert epub to pdf
     SAFE_LABEL=$(sanitize_filename "$label")
     OUTPUT_PDF="$SOURCE_PDF_FOLDER/${SAFE_LABEL}.pdf"
-    echo "Executing: $EBOOK_CONVERT_PATH \"$OUTPUT_EPUB\" \"$OUTPUT_PDF\""
+    echo "  EPUB -> PDF: $EBOOK_CONVERT_PATH \"$OUTPUT_EPUB\" \"$OUTPUT_PDF\""
     "$EBOOK_CONVERT_PATH" "$OUTPUT_EPUB" "$OUTPUT_PDF"
+
+    if [ $? -ne 0 ]; then
+        echo "  ERROR: ebook-convert failed for $folder_name"
+        continue
+    fi
+
+    echo "  Done: $OUTPUT_PDF"
 done
 
 echo "Notebook conversion complete."

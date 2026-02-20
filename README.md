@@ -39,9 +39,17 @@ Ensure the following are installed:
    - Open Calibre
    - Go to Preferences > Plugins > Get new plugins
    - Search for "KFX Input" and install it
-   - Or download from [MobileRead](https://www.mobileread.com/forums/showthread.php?t=291290) and install manually
+   - Restart Calibre after installation
+   - Or download from [MobileRead](https://www.mobileread.com/forums/showthread.php?t=291290) and install manually via Preferences > Plugins > Load plugin from file
 
-3. **Install LogSeq** (optional) from [logseq.com](https://logseq.com/)
+3. **Install libmtp** (required for macOS — the Kindle Scribe uses MTP, which macOS doesn't support natively):
+   ```bash
+   brew install libmtp
+   ```
+
+4. **Install LogSeq** (optional) from [logseq.com](https://logseq.com/)
+
+5. **Python 3** (should already be installed on macOS)
 
 ### macOS Scripts
 
@@ -51,6 +59,7 @@ Ensure the following are installed:
 | `scribe_watcher.sh` | Watches for Kindle Scribe USB connection and triggers sync. |
 | `export_from_scribe.sh` | Extracts notebooks from the Kindle and converts them to PDF via Calibre. |
 | `add_to_logseq.sh` | Copies PDFs to Logseq assets and updates the Scribe Notebooks page. |
+| `mtp_pull.py` | MTP file access layer — connects to the Scribe and transfers files. |
 
 ### macOS Usage
 
@@ -65,11 +74,13 @@ Ensure the following are installed:
    bash script/scribe_watcher.sh
    ```
 
-3. Connect your Kindle Scribe via USB. The script will automatically detect it, export notebooks, and sync to Logseq.
+3. Connect your Kindle Scribe via USB. The script will automatically detect it via MTP, export notebooks, and sync to Logseq.
 
 ### How It Works on macOS
 
-On macOS, the Kindle Scribe mounts as a standard volume under `/Volumes/` (typically `/Volumes/Kindle`). The watcher script polls for this mount point every 5 seconds. When detected, it accesses the notebooks directly through the filesystem — no special drivers or COM objects needed.
+The Kindle Scribe uses **MTP (Media Transfer Protocol)**, not USB Mass Storage. Unlike Windows (which has native MTP support), macOS cannot mount the Scribe as a filesystem volume. Instead, we use `libmtp` via a Python ctypes wrapper (`mtp_pull.py`) to communicate directly with the device.
+
+The watcher script detects the Scribe via MTP, downloads all notebook files in a single connection (the Scribe disconnects from USB between MTP sessions), converts them to PDF via Calibre's KFX Input plugin, and syncs the results to Logseq.
 
 ---
 
